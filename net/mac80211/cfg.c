@@ -3204,9 +3204,6 @@ __ieee80211_channel_switch(struct wiphy *wiphy, struct net_device *dev,
 	sdata_assert_lock(sdata);
 	lockdep_assert_held(&local->mtx);
 
-	if (!list_empty(&local->roc_list) || local->scanning)
-		return -EBUSY;
-
 	if (sdata->wdev.cac_started)
 		return -EBUSY;
 
