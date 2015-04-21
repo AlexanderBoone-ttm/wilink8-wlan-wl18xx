@@ -687,6 +687,8 @@ enum wlcore_generic_cfg_feature {
 };
 
 struct wlcore_cmd_generic_cfg {
+	struct wl1271_cmd_header header;
+
 	u8 role_id;
 	u8 feature;
 	u8 enable;
