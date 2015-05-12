@@ -40,6 +40,7 @@ enum {
 	PERIODIC_SCAN_REPORT_EVENT_ID            = BIT(20),
 	SMART_CONFIG_SYNC_EVENT_ID		 = BIT(22),
 	SMART_CONFIG_DECODE_EVENT_ID		 = BIT(23),
+	AUDIO_SYNC_EVENT_ID                      = BIT(24),
 };
 
 enum wl18xx_radar_types {
@@ -95,13 +96,14 @@ struct wl18xx_event_mailbox {
 	/* smart config sync channel */
 	u8 sc_sync_channel;
 	u8 sc_sync_band;
-	u8 padding2[2];
 
 	/* radar detect */
 	u8 radar_channel;
 	u8 radar_type;
 
-	u8 padding3[2];
+	/* audio sync */
+	u32 audio_sync_clock;
+
 } __packed;
 
 int wl18xx_wait_for_event(struct wl1271 *wl, enum wlcore_wait_event event,

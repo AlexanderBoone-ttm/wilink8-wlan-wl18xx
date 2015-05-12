@@ -112,6 +112,11 @@ static int wlcore_smart_config_decode_event(struct wl1271 *wl,
 	return 0;
 }
 
+static void wlcore_event_clock_sync(struct wl1271 *wl, u32 clock)
+{
+	wl1271_info("AUDIO_SYNC_EVENT_ID: clock %d", clock);
+}
+
 int wl18xx_process_mailbox_events(struct wl1271 *wl)
 {
 	struct wl18xx_event_mailbox *mbox = wl->mbox;
@@ -127,6 +132,9 @@ int wl18xx_process_mailbox_events(struct wl1271 *wl)
 		if (wl->scan_wlvif)
 			wl18xx_scan_completed(wl, wl->scan_wlvif);
 	}
+
+	if (vector & AUDIO_SYNC_EVENT_ID)
+		wlcore_event_clock_sync(wl, mbox->audio_sync_clock);
 
 	if (vector & RADAR_DETECTED_EVENT_ID) {
 		wl1271_info("radar event: channel %d type %s",
