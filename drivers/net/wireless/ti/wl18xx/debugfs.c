@@ -29,6 +29,7 @@
 #include "acx.h"
 #include "cmd.h"
 #include "debugfs.h"
+#include <linux/gpio.h>
 
 #define WL18XX_DEBUGFS_FWSTATS_FILE(a, b, c) \
 	DEBUGFS_FWSTATS_FILE(a, b, c, wl18xx_acx_statistics)
@@ -406,6 +407,49 @@ static const struct file_operations dynamic_fw_traces_ops = {
 	.llseek = default_llseek,
 };
 
+static ssize_t clock_sync_write(struct file *file,
+				const char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	struct wl1271 *wl = file->private_data;
+	unsigned long value;
+	int ret;
+
+	ret = kstrtoul_from_user(user_buf, count, 0, &value);
+	if (ret < 0) {
+		wl1271_warning("illegal value for clock sync");
+		return -EINVAL;
+	}
+
+	if (value > 1000) {
+		wl1271_warning("clock sync interval must be between 0 and 1000");
+		return -ERANGE;
+	}
+
+	mutex_lock(&wl->mutex);
+
+	wl->clock_sync.interval_ms = value;
+
+	if (value == 0) {
+		hrtimer_cancel(&wl->clock_sync.timer);
+	} else {
+		wl1271_info("Triggering sync GPIO");
+		wlcore_trigger_clock_sync(wl);
+	}
+
+	mutex_unlock(&wl->mutex);
+
+	return count;
+}
+
+static const struct file_operations clock_sync_ops = {
+    .write = clock_sync_write,
+    .open = simple_open,
+    .llseek = default_llseek,
+};
+
+
+
 int wl18xx_debugfs_add_files(struct wl1271 *wl,
 			     struct dentry *rootdir)
 {
@@ -573,6 +617,7 @@ int wl18xx_debugfs_add_files(struct wl1271 *wl,
 
 	DEBUGFS_ADD(conf, moddir);
 	DEBUGFS_ADD(radar_detection, moddir);
+	DEBUGFS_ADD(clock_sync, moddir);
 	DEBUGFS_ADD(radar_debug_mode, moddir);
 	DEBUGFS_ADD(dynamic_fw_traces, moddir);
 

@@ -27,6 +27,7 @@
 #include <linux/vmalloc.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/gpio.h>
 
 #include "wlcore.h"
 #include "debug.h"
@@ -6070,6 +6071,40 @@ static void wl1271_unregister_hw(struct wl1271 *wl)
 
 }
 
+void wlcore_trigger_clock_sync(struct wl1271 *wl)
+{
+	wl->clock_sync.gpio_ktime = ktime_get();
+	gpio_set_value(wl->clock_sync.gpio, 1);
+	udelay(1);
+	gpio_set_value(wl->clock_sync.gpio, 0);
+}
+EXPORT_SYMBOL_GPL(wlcore_trigger_clock_sync);
+
+static enum hrtimer_restart wlcore_audio_sync_hrtimer_cb(struct hrtimer *timer)
+{
+	struct wlcore_clock_sync *clock_sync =
+		container_of(timer, struct wlcore_clock_sync, timer);
+	struct wl1271 *wl =
+		container_of(clock_sync, struct wl1271, clock_sync);
+	struct timespec ts;
+
+	while (ktime_compare(ktime_get(), wl->clock_sync.target_ktime) < 0)
+	{
+		ndelay(100);
+	}
+
+	wlcore_trigger_clock_sync(wl);
+
+	/* Some debug prints */
+	ts = ktime_to_timespec(wl->clock_sync.target_ktime);
+	printk("yaniv callback - target ktime  sec=%lu nsec=%lu \n", ts.tv_sec, ts.tv_nsec);
+
+	ts = ktime_to_timespec(wl->clock_sync.gpio_ktime);
+	printk("yaniv gpio sync time  sec=%lu nsec=%lu \n",ts.tv_sec, ts.tv_nsec);
+
+	return HRTIMER_NORESTART;
+}
+
 static int wl1271_init_ieee80211(struct wl1271 *wl)
 {
 	int i;
@@ -6335,8 +6370,24 @@ struct ieee80211_hw *wlcore_alloc_hw(size_t priv_size, u32 aggr_buf_size,
 		goto err_mbox;
 	}
 
+	/* clock sync */
+	wl->clock_sync.gpio = 66;
+	ret = gpio_request_one(wl->clock_sync.gpio, GPIOF_DIR_OUT, "audio_sync");
+	if (ret < 0) {
+		wl1271_error("error requesting audio_sync gpio");
+		goto err_buffer_32;
+	}
+	wl1271_info("Clock Sync: gpio requested");
+
+	hrtimer_init(&wl->clock_sync.timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	wl->clock_sync.timer.function = &wlcore_audio_sync_hrtimer_cb;
+	wl->clock_sync.gpio_ktime = ktime_set(0, 0);
+	wl->clock_sync.target_ktime = ktime_set(0, 0);
+
 	return hw;
 
+err_buffer_32:
+	kfree(wl->buffer_32);
 err_mbox:
 	kfree(wl->mbox);
 
@@ -6384,6 +6435,8 @@ int wlcore_free_hw(struct wl1271 *wl)
 	mutex_unlock(&wl->mutex);
 
 	wlcore_sysfs_free(wl);
+
+	gpio_free(wl->clock_sync.gpio);
 
 	kfree(wl->buffer_32);
 	kfree(wl->mbox);

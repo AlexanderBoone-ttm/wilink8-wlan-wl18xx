@@ -20,6 +20,8 @@
  */
 
 #include <net/genetlink.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
 #include "event.h"
 #include "scan.h"
 #include "../wlcore/cmd.h"
@@ -114,7 +116,45 @@ static int wlcore_smart_config_decode_event(struct wl1271 *wl,
 
 static void wlcore_event_clock_sync(struct wl1271 *wl, u32 clock)
 {
+	ktime_t ktime;
+	struct timespec ts;
+	u32 interval_usc;
+	u32 mod_usc;
+	u32 next_tick_usc;
+
 	wl1271_info("AUDIO_SYNC_EVENT_ID: clock %d", clock);
+
+	/* Calculate the next tick */
+	interval_usc = wl->clock_sync.interval_ms * USEC_PER_MSEC;
+	mod_usc  = clock % interval_usc;
+	next_tick_usc  = interval_usc -  mod_usc;
+
+	/* skip the current interval if there's no time left */
+	if (next_tick_usc < 20)
+		next_tick_usc = next_tick_usc + interval_usc;
+
+	/* schedule hr timer (interval - 200ns) after last GPIO */
+	ktime = ktime_add_ns(wl->clock_sync.gpio_ktime,
+			     NSEC_PER_USEC * (next_tick_usc - 200));
+
+	/* save the actual target time  for next wake-up */
+	wl->clock_sync.target_ktime =
+		ktime_add_ns(wl->clock_sync.gpio_ktime,
+			     NSEC_PER_USEC * (next_tick_usc));
+
+	/* set the timer */
+	hrtimer_start(&wl->clock_sync.timer, ktime, HRTIMER_MODE_ABS);
+
+	/* some debug prints */
+	ktime = ktime_get();
+	ts = ktime_to_timespec(ktime);
+	printk("AUDIO-Sync current ktime - target  TSF=%u next_tick_us=%d  sec=%lu nsec=%lu \n", clock, next_tick_usc,ts.tv_sec, ts.tv_nsec);
+
+	ts = ktime_to_timespec(wl->clock_sync.target_ktime);
+	printk("AUDIO-Sync target ktime  TSF=%u next_tick_us=%d  sec=%lu nsec=%lu \n", clock, next_tick_usc,ts.tv_sec, ts.tv_nsec);
+
+	ts = ktime_to_timespec(wl->clock_sync.gpio_ktime);
+	printk("AUDIO-Sync gpio ktime  TSF=%u next_tick_us=%d  sec=%lu nsec=%lu \n", clock, next_tick_usc,ts.tv_sec, ts.tv_nsec);
 }
 
 int wl18xx_process_mailbox_events(struct wl1271 *wl)
