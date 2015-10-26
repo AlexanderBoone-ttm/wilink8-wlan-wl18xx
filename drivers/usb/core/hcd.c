@@ -46,6 +46,7 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 #include <linux/usb/phy.h>
+#include <linux/usb/otg.h>
 
 #include "usb.h"
 
@@ -1022,9 +1023,12 @@ static int register_root_hub(struct usb_hcd *hcd)
 				dev_name(&usb_dev->dev), retval);
 		return (retval < 0) ? retval : -EMSGSIZE;
 	}
-	if (usb_dev->speed == USB_SPEED_SUPER) {
+
+	if (le16_to_cpu(usb_dev->descriptor.bcdUSB) >= 0x0201) {
 		retval = usb_get_bos_descriptor(usb_dev);
-		if (retval < 0) {
+		if (!retval) {
+			usb_dev->lpm_capable = usb_device_supports_lpm(usb_dev);
+		} else if (usb_dev->speed == USB_SPEED_SUPER) {
 			mutex_unlock(&usb_bus_list_lock);
 			dev_dbg(parent_dev, "can't read %s bos descriptor %d\n",
 					dev_name(&usb_dev->dev), retval);
@@ -2622,12 +2626,13 @@ static void usb_put_invalidate_rhdev(struct usb_hcd *hcd)
  * buffers of consistent memory, register the bus, request the IRQ line,
  * and call the driver's reset() and start() routines.
  */
-int usb_add_hcd(struct usb_hcd *hcd,
-		unsigned int irqnum, unsigned long irqflags)
+static int usb_otg_add_hcd(struct usb_hcd *hcd,
+			   unsigned int irqnum, unsigned long irqflags)
 {
 	int retval;
 	struct usb_device *rhdev;
 
+	hcd->flags = 0;
 	if (IS_ENABLED(CONFIG_USB_PHY) && !hcd->usb_phy) {
 		struct usb_phy *phy = usb_get_phy_dev(hcd->self.controller, 0);
 
@@ -2827,17 +2832,16 @@ err_phy:
 	}
 	return retval;
 }
-EXPORT_SYMBOL_GPL(usb_add_hcd);
 
 /**
- * usb_remove_hcd - shutdown processing for generic HCDs
+ * usb_otg_remove_hcd - shutdown processing for generic HCDs
  * @hcd: the usb_hcd structure to remove
  * Context: !in_interrupt()
  *
  * Disconnects the root hub, then reverses the effects of usb_add_hcd(),
  * invoking the HCD's stop() method.
  */
-void usb_remove_hcd(struct usb_hcd *hcd)
+static void usb_otg_remove_hcd(struct usb_hcd *hcd)
 {
 	struct usb_device *rhdev = hcd->self.root_hub;
 
@@ -2910,6 +2914,51 @@ void usb_remove_hcd(struct usb_hcd *hcd)
 	}
 
 	usb_put_invalidate_rhdev(hcd);
+}
+
+static struct otg_hcd_ops otg_hcd_intf = {
+	.add = usb_otg_add_hcd,
+	.remove = usb_otg_remove_hcd,
+};
+
+/**
+ * usb_add_hcd - finish generic HCD structure initialization and register
+ * @hcd: the usb_hcd structure to initialize
+ * @irqnum: Interrupt line to allocate
+ * @irqflags: Interrupt type flags
+ *
+ * Finish the remaining parts of generic HCD initialization: allocate the
+ * buffers of consistent memory, register the bus, request the IRQ line,
+ * and call the driver's reset() and start() routines.
+ * If it is an OTG device then it only registers the HCD with OTG core.
+ *
+ */
+int usb_add_hcd(struct usb_hcd *hcd,
+		unsigned int irqnum, unsigned long irqflags)
+{
+	/* If OTG device, OTG core takes care of adding HCD */
+	if (usb_otg_register_hcd(hcd, irqnum, irqflags, &otg_hcd_intf))
+		return usb_otg_add_hcd(hcd, irqnum, irqflags);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(usb_add_hcd);
+
+/**
+ * usb_remove_hcd - shutdown processing for generic HCDs
+ * @hcd: the usb_hcd structure to remove
+ * Context: !in_interrupt()
+ *
+ * Disconnects the root hub, then reverses the effects of usb_add_hcd(),
+ * invoking the HCD's stop() method.
+ * If it is an OTG device then it unregisters the HCD from OTG core
+ * as well.
+ */
+void usb_remove_hcd(struct usb_hcd *hcd)
+{
+	/* If OTG device, OTG core takes care of stopping HCD */
+	if (usb_otg_unregister_hcd(hcd))
+		usb_otg_remove_hcd(hcd);
 }
 EXPORT_SYMBOL_GPL(usb_remove_hcd);
 

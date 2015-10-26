@@ -38,6 +38,7 @@
 #include <linux/slab.h>
 #include <linux/i2c-omap.h>
 #include <linux/pm_runtime.h>
+#include <linux/pinctrl/consumer.h>
 
 /* I2C controller revisions */
 #define OMAP_I2C_OMAP1_REV_2		0x20
@@ -1246,7 +1247,14 @@ static void omap_i2c_prepare_recovery(struct i2c_adapter *adap)
 	u32 reg;
 
 	reg = omap_i2c_read_reg(dev, OMAP_I2C_SYSTEST_REG);
+	/* enable test mode */
 	reg |= OMAP_I2C_SYSTEST_ST_EN;
+	/* select SDA/SCL IO mode */
+	reg |= 3 << OMAP_I2C_SYSTEST_TMODE_SHIFT;
+	/* set SCL to high-impedance state (reset value is 0) */
+	reg |= OMAP_I2C_SYSTEST_SCL_O;
+	/* set SDA to high-impedance state (reset value is 0) */
+	reg |= OMAP_I2C_SYSTEST_SDA_O;
 	omap_i2c_write_reg(dev, OMAP_I2C_SYSTEST_REG, reg);
 }
 
@@ -1256,7 +1264,11 @@ static void omap_i2c_unprepare_recovery(struct i2c_adapter *adap)
 	u32 reg;
 
 	reg = omap_i2c_read_reg(dev, OMAP_I2C_SYSTEST_REG);
+	/* restore reset values */
 	reg &= ~OMAP_I2C_SYSTEST_ST_EN;
+	reg &= ~OMAP_I2C_SYSTEST_TMODE_MASK;
+	reg &= ~OMAP_I2C_SYSTEST_SCL_O;
+	reg &= ~OMAP_I2C_SYSTEST_SDA_O;
 	omap_i2c_write_reg(dev, OMAP_I2C_SYSTEST_REG, reg);
 }
 
@@ -1484,6 +1496,8 @@ static int omap_i2c_runtime_suspend(struct device *dev)
 		omap_i2c_read_reg(_dev, OMAP_I2C_STAT_REG);
 	}
 
+	pinctrl_pm_select_sleep_state(dev);
+
 	return 0;
 }
 
@@ -1494,6 +1508,8 @@ static int omap_i2c_runtime_resume(struct device *dev)
 
 	if (!_dev->regs)
 		return 0;
+
+	pinctrl_pm_select_default_state(dev);
 
 	__omap_i2c_init(_dev);
 

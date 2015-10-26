@@ -246,6 +246,14 @@
 				ti,mbox-tx = <0 0 0>;
 				ti,mbox-rx = <0 0 3>;
 			};
+			mbox_pru1_0: mbox_pru1_0 {
+				ti,mbox-tx = <2 0 0>;
+				ti,mbox-rx = <3 0 0>;
+			};
+			mbox_pru1_1: mbox_pru1_1 {
+				ti,mbox-tx = <4 0 0>;
+				ti,mbox-rx = <5 0 0>;
+			};
 		};
 
 		timer1: timer@44e31000 {
@@ -351,6 +359,7 @@
 			interrupts = <GIC_SPI 75 IRQ_TYPE_LEVEL_HIGH
 				      GIC_SPI 76 IRQ_TYPE_LEVEL_HIGH>;
 			ti,hwmods = "rtc";
+			system-power-controller;
 			status = "disabled";
 		};
 
@@ -788,11 +797,64 @@
 			dma-names = "tx", "rx";
 		};
 
+		/*
+		 * The SGX is disabled by default because it is an optional
+		 * module and only some AM437x variants contain this module,
+		 * such as AM4378 and AM4379. The status should be overwritten
+		 * as "OK" at the corresponding board.dts.
+		 */
+		sgx: sgx@0x56000000 {
+			compatible = "ti,am4376-sgx530", "img,sgx530";
+			ti,hwmods = "gfx";
+			reg = <0x56000000 0x1000000>;
+			interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>;
+			status = "disabled";
+		};
+
 		rng: rng@48310000 {
 			compatible = "ti,omap4-rng";
 			ti,hwmods = "rng";
 			reg = <0x48310000 0x2000>;
 			interrupts = <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pruss1: pruss@54400000 {
+			compatible = "ti,am4372-pruss";
+			ti,hwmods = "pruss";
+			reg = <0x54400000 0x2000>,
+			      <0x54402000 0x2000>,
+			      <0x54410000 0x8000>,
+			      <0x54420000 0x2000>,
+			      <0x54426000 0x2000>;
+			reg-names = "dram0", "dram1", "shrdram2", "intc", "cfg";
+			interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH
+				      GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges;
+
+			pru1_0: pru@54434000 {
+				compatible = "ti,am4372-pru-rproc";
+				reg = <0x54434000 0x3000>,
+				      <0x54422000 0x400>,
+				      <0x54422400 0x100>;
+				reg-names = "iram", "control", "debug";
+				mboxes = <&mailbox &mbox_pru1_0>;
+			};
+
+			pru1_1: pru@54438000 {
+				compatible = "ti,am4372-pru-rproc";
+				reg = <0x54438000 0x3000>,
+				      <0x54424000 0x400>,
+				      <0x54424400 0x100>;
+				reg-names = "iram", "control", "debug";
+				mboxes = <&mailbox &mbox_pru1_1>;
+			};
 		};
 
 		mcasp0: mcasp@48038000 {
@@ -844,6 +906,10 @@
 			gpmc,num-waitpins = <2>;
 			#address-cells = <2>;
 			#size-cells = <1>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			interrupt-controller;
+			#interrupt-cells = <2>;
 			status = "disabled";
 		};
 
@@ -910,7 +976,12 @@
 			usb1: usb@48390000 {
 				compatible = "synopsys,dwc3";
 				reg = <0x48390000 0x10000>;
-				interrupts = <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 172 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-names = "peripheral",
+						  "host",
+						  "otg";
 				phys = <&usb2_phy1>;
 				phy-names = "usb2-phy";
 				maximum-speed = "high-speed";
@@ -934,7 +1005,12 @@
 			usb2: usb@483d0000 {
 				compatible = "synopsys,dwc3";
 				reg = <0x483d0000 0x10000>;
-				interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
+				interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>,
+					     <GIC_SPI 178 IRQ_TYPE_LEVEL_HIGH>;
+				interrupt-names = "peripheral",
+						  "host",
+						  "otg";
 				phys = <&usb2_phy2>;
 				phy-names = "usb2-phy";
 				maximum-speed = "high-speed";
@@ -947,7 +1023,9 @@
 
 		qspi: qspi@47900000 {
 			compatible = "ti,am4372-qspi";
-			reg = <0x47900000 0x100>;
+			reg = <0x47900000 0x100>,
+			      <0x30000000 0x3ffffff>;
+			reg-names = "qspi_base", "qspi_mmap";
 			#address-cells = <1>;
 			#size-cells = <0>;
 			ti,hwmods = "qspi";

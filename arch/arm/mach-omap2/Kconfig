@@ -44,10 +44,12 @@ config SOC_OMAP5
 	select ARM_CPU_SUSPEND if PM
 	select ARM_GIC
 	select HAVE_ARM_SCU if SMP
-	select HAVE_ARM_TWD if SMP
 	select HAVE_ARM_ARCH_TIMER
 	select ARM_ERRATA_798181 if SMP
+	select OMAP_INTERCONNECT
 	select OMAP_INTERCONNECT_BARRIER
+	select PM_OPP if PM
+	select ZONE_DMA if ARM_LPAE
 
 config SOC_AM33XX
 	bool "TI AM33XX"
@@ -63,6 +65,9 @@ config SOC_AM43XX
 	select MACH_OMAP_GENERIC
 	select MIGHT_HAVE_CACHE_L2X0
 	select HAVE_ARM_SCU
+	select OMAP_INTERCONNECT
+	select OMAP_INTERCONNECT_BARRIER
+	select PM_OPP if PM
 
 config SOC_DRA7XX
 	bool "TI DRA7XX"
@@ -70,10 +75,14 @@ config SOC_DRA7XX
 	select ARCH_OMAP2PLUS
 	select ARM_CPU_SUSPEND if PM
 	select ARM_GIC
+	select HAVE_ARM_SCU if SMP
 	select HAVE_ARM_ARCH_TIMER
 	select IRQ_CROSSBAR
 	select ARM_ERRATA_798181 if SMP
+	select OMAP_INTERCONNECT
 	select OMAP_INTERCONNECT_BARRIER
+	select PM_OPP if PM
+	select ZONE_DMA if ARM_LPAE
 
 config ARCH_OMAP2PLUS
 	bool
@@ -273,7 +282,7 @@ config OMAP3_SDRC_AC_TIMING
 config AMX3_PM
 	tristate "AMx3 Power Management"
 	depends on SOC_AM33XX || SOC_AM43XX
-	depends on WKUP_M3_IPC && TI_EMIF_SRAM
+	depends on WKUP_M3_IPC && TI_EMIF_SRAM && RTC_DRV_OMAP
 	default y
 	help
 	  Enable power management on am335x and am437x. Required for suspend to mem
@@ -282,5 +291,13 @@ config AMX3_PM
 endmenu
 
 endif
+
+config OMAP5_ERRATA_801819
+	bool "Errata 801819: An eviction from L1 data cache might stall indefinitely"
+	depends on SOC_OMAP5 || SOC_DRA7XX
+	help
+	  A livelock can occur in the L2 cache arbitration that might prevent
+	  a snoop from completing. Under certain conditions this can cause the
+	  system to deadlock.
 
 endmenu

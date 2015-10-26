@@ -115,6 +115,12 @@ struct am33xx_pm_ops {
 	int	(*soc_suspend)(unsigned int state, int (*fn)(unsigned long),
 			       unsigned long args);
 	int	(*cpu_suspend)(int (*fn)(unsigned long), unsigned long args);
+	void (*save_context)(void);
+	void (*restore_context)(void);
+	void (*prepare_rtc_suspend)(void);
+	void (*prepare_rtc_resume)(void);
+	int (*check_off_mode_enable)(void);
+	void __iomem *(*get_rtc_base_addr)(void);
 };
 
 /* for sharing asm function addrs with amx3 pm modules */
@@ -123,6 +129,8 @@ struct am33xx_pm_sram_addr {
 	unsigned long *do_wfi_sz;
 	unsigned long *resume_offset;
 	unsigned long *emif_sram_table;
+	unsigned long *rtc_base_virt;
+	phys_addr_t rtc_resume_phys_addr;
 };
 
 struct am33xx_pm_ops *amx3_get_pm_ops(void);
@@ -159,7 +167,8 @@ static inline void enable_omap3630_toggle_l2_on_restore(void) { }
 #define PM_OMAP4_ROM_SMP_BOOT_ERRATUM_GICD	(1 << 0)
 #define PM_OMAP4_CPU_OSWR_DISABLE		(1 << 1)
 
-#if defined(CONFIG_PM) && defined(CONFIG_ARCH_OMAP4)
+#if defined(CONFIG_PM) && (defined(CONFIG_ARCH_OMAP4) ||\
+	   defined(CONFIG_SOC_OMAP5) || defined (CONFIG_SOC_DRA7XX))
 extern u16 pm44xx_errata;
 #define IS_PM44XX_ERRATUM(id)		(pm44xx_errata & (id))
 #else
@@ -197,10 +206,12 @@ static inline int omap4_twl_init(void)
 extern void omap_pm_setup_oscillator(u32 tstart, u32 tshut);
 extern void omap_pm_get_oscillator(u32 *tstart, u32 *tshut);
 extern void omap_pm_setup_sr_i2c_pcb_length(u32 mm);
+void amx3_common_pm_init(void);
 #else
 static inline void omap_pm_setup_oscillator(u32 tstart, u32 tshut) { }
 static inline void omap_pm_get_oscillator(u32 *tstart, u32 *tshut) { *tstart = *tshut = 0; }
 static inline void omap_pm_setup_sr_i2c_pcb_length(u32 mm) { }
+static inline void amx3_common_pm_init(void) { }
 #endif
 
 #ifdef CONFIG_SUSPEND

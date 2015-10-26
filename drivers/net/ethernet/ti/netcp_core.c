@@ -51,6 +51,8 @@
 		    NETIF_MSG_PKTDATA	| NETIF_MSG_TX_QUEUED	|	\
 		    NETIF_MSG_RX_STATUS)
 
+#define NETCP_EFUSE_ADDR_SWAP	2
+
 #define knav_queue_get_id(q)	knav_queue_device_control(q, \
 				KNAV_QUEUE_GET_ID, (unsigned long)NULL)
 
@@ -172,12 +174,21 @@ static void set_words(u32 *words, int num_words, u32 *desc)
 }
 
 /* Read the e-fuse value as 32 bit values to be endian independent */
-static int emac_arch_get_mac_addr(char *x, void __iomem *efuse_mac)
+static int emac_arch_get_mac_addr(char *x, void __iomem *efuse_mac, u32 swap)
 {
 	unsigned int addr0, addr1;
 
 	addr1 = readl(efuse_mac + 4);
 	addr0 = readl(efuse_mac);
+
+	switch (swap) {
+	case NETCP_EFUSE_ADDR_SWAP:
+		addr0 = addr1;
+		addr1 = readl(efuse_mac);
+		break;
+	default:
+		break;
+	}
 
 	x[0] = (addr1 & 0x0000ff00) >> 8;
 	x[1] = addr1 & 0x000000ff;
@@ -279,13 +290,6 @@ static int netcp_module_probe(struct netcp_device *netcp_device,
 			    interface_list) {
 		struct netcp_intf_modpriv *intf_modpriv;
 
-		/* If interface not registered then register now */
-		if (!netcp_intf->netdev_registered)
-			ret = netcp_register_interface(netcp_intf);
-
-		if (ret)
-			return -ENODEV;
-
 		intf_modpriv = devm_kzalloc(dev, sizeof(*intf_modpriv),
 					    GFP_KERNEL);
 		if (!intf_modpriv)
@@ -293,6 +297,11 @@ static int netcp_module_probe(struct netcp_device *netcp_device,
 
 		interface = of_parse_phandle(netcp_intf->node_interface,
 					     module->name, 0);
+
+		if (!interface) {
+			devm_kfree(dev, intf_modpriv);
+			continue;
+		}
 
 		intf_modpriv->netcp_priv = netcp_intf;
 		intf_modpriv->netcp_module = module;
@@ -309,6 +318,18 @@ static int netcp_module_probe(struct netcp_device *netcp_device,
 			list_del(&intf_modpriv->intf_list);
 			devm_kfree(dev, intf_modpriv);
 			continue;
+		}
+	}
+
+	/* Now register the interface with netdev */
+	list_for_each_entry(netcp_intf,
+			    &netcp_device->interface_head,
+			    interface_list) {
+		/* If interface not registered then register now */
+		if (!netcp_intf->netdev_registered) {
+			ret = netcp_register_interface(netcp_intf);
+			if (ret)
+				return -ENODEV;
 		}
 	}
 	return 0;
@@ -345,7 +366,6 @@ int netcp_register_module(struct netcp_module *module)
 		if (ret < 0)
 			goto fail;
 	}
-
 	mutex_unlock(&netcp_modules_lock);
 	return 0;
 
@@ -785,7 +805,7 @@ static void netcp_rxpool_free(struct netcp_intf *netcp)
 	netcp->rx_pool = NULL;
 }
 
-static void netcp_allocate_rx_buf(struct netcp_intf *netcp, int fdq)
+static int netcp_allocate_rx_buf(struct netcp_intf *netcp, int fdq)
 {
 	struct knav_dma_desc *hwdesc;
 	unsigned int buf_len, dma_sz;
@@ -799,7 +819,7 @@ static void netcp_allocate_rx_buf(struct netcp_intf *netcp, int fdq)
 	hwdesc = knav_pool_desc_get(netcp->rx_pool);
 	if (IS_ERR_OR_NULL(hwdesc)) {
 		dev_dbg(netcp->ndev_dev, "out of rx pool desc\n");
-		return;
+		return -ENOMEM;
 	}
 
 	if (likely(fdq == 0)) {
@@ -853,25 +873,26 @@ static void netcp_allocate_rx_buf(struct netcp_intf *netcp, int fdq)
 	knav_pool_desc_map(netcp->rx_pool, hwdesc, sizeof(*hwdesc), &dma,
 			   &dma_sz);
 	knav_queue_push(netcp->rx_fdq[fdq], dma, sizeof(*hwdesc), 0);
-	return;
+	return 0;
 
 fail:
 	knav_pool_desc_put(netcp->rx_pool, hwdesc);
+	return -ENOMEM;
 }
 
 /* Refill Rx FDQ with descriptors & attached buffers */
 static void netcp_rxpool_refill(struct netcp_intf *netcp)
 {
 	u32 fdq_deficit[KNAV_DMA_FDQ_PER_CHAN] = {0};
-	int i;
+	int i, ret = 0;
 
 	/* Calculate the FDQ deficit and refill */
 	for (i = 0; i < KNAV_DMA_FDQ_PER_CHAN && netcp->rx_fdq[i]; i++) {
 		fdq_deficit[i] = netcp->rx_queue_depths[i] -
 				 knav_queue_get_count(netcp->rx_fdq[i]);
 
-		while (fdq_deficit[i]--)
-			netcp_allocate_rx_buf(netcp, i);
+		while (fdq_deficit[i]-- && !ret)
+			ret = netcp_allocate_rx_buf(netcp, i);
 	} /* end for fdqs */
 }
 
@@ -884,12 +905,12 @@ static int netcp_rx_poll(struct napi_struct *napi, int budget)
 
 	packets = netcp_process_rx_packets(netcp, budget);
 
+	netcp_rxpool_refill(netcp);
 	if (packets < budget) {
 		napi_complete(&netcp->rx_napi);
 		knav_queue_enable_notify(netcp->rx_queue);
 	}
 
-	netcp_rxpool_refill(netcp);
 	return packets;
 }
 
@@ -1375,7 +1396,6 @@ static void netcp_addr_sweep_del(struct netcp_intf *netcp)
 			continue;
 		dev_dbg(netcp->ndev_dev, "deleting address %pM, type %x\n",
 			naddr->addr, naddr->type);
-		mutex_lock(&netcp_modules_lock);
 		for_each_module(netcp, priv) {
 			module = priv->netcp_module;
 			if (!module->del_addr)
@@ -1384,7 +1404,6 @@ static void netcp_addr_sweep_del(struct netcp_intf *netcp)
 						 naddr);
 			WARN_ON(error);
 		}
-		mutex_unlock(&netcp_modules_lock);
 		netcp_addr_del(netcp, naddr);
 	}
 }
@@ -1401,7 +1420,7 @@ static void netcp_addr_sweep_add(struct netcp_intf *netcp)
 			continue;
 		dev_dbg(netcp->ndev_dev, "adding address %pM, type %x\n",
 			naddr->addr, naddr->type);
-		mutex_lock(&netcp_modules_lock);
+
 		for_each_module(netcp, priv) {
 			module = priv->netcp_module;
 			if (!module->add_addr)
@@ -1409,7 +1428,6 @@ static void netcp_addr_sweep_add(struct netcp_intf *netcp)
 			error = module->add_addr(priv->module_priv, naddr);
 			WARN_ON(error);
 		}
-		mutex_unlock(&netcp_modules_lock);
 	}
 }
 
@@ -1423,6 +1441,7 @@ static void netcp_set_rx_mode(struct net_device *ndev)
 		   ndev->flags & IFF_ALLMULTI ||
 		   netdev_mc_count(ndev) > NETCP_MAX_MCAST_ADDR);
 
+	spin_lock(&netcp->lock);
 	/* first clear all marks */
 	netcp_addr_clear_mark(netcp);
 
@@ -1441,6 +1460,7 @@ static void netcp_set_rx_mode(struct net_device *ndev)
 	/* finally sweep and callout into modules */
 	netcp_addr_sweep_del(netcp);
 	netcp_addr_sweep_add(netcp);
+	spin_unlock(&netcp->lock);
 }
 
 static void netcp_free_navigator_resources(struct netcp_intf *netcp)
@@ -1605,7 +1625,6 @@ static int netcp_ndo_open(struct net_device *ndev)
 		goto fail;
 	}
 
-	mutex_lock(&netcp_modules_lock);
 	for_each_module(netcp, intf_modpriv) {
 		module = intf_modpriv->netcp_module;
 		if (module->open) {
@@ -1616,13 +1635,12 @@ static int netcp_ndo_open(struct net_device *ndev)
 			}
 		}
 	}
-	mutex_unlock(&netcp_modules_lock);
 
-	netcp_rxpool_refill(netcp);
 	napi_enable(&netcp->rx_napi);
 	napi_enable(&netcp->tx_napi);
 	knav_queue_enable_notify(netcp->tx_compl_q);
 	knav_queue_enable_notify(netcp->rx_queue);
+	netcp_rxpool_refill(netcp);
 	netif_tx_wake_all_queues(ndev);
 	dev_dbg(netcp->ndev_dev, "netcp device %s opened\n", ndev->name);
 	return 0;
@@ -1633,7 +1651,6 @@ fail_open:
 		if (module->close)
 			module->close(intf_modpriv->module_priv, ndev);
 	}
-	mutex_unlock(&netcp_modules_lock);
 
 fail:
 	netcp_free_navigator_resources(netcp);
@@ -1657,7 +1674,6 @@ static int netcp_ndo_stop(struct net_device *ndev)
 	napi_disable(&netcp->rx_napi);
 	napi_disable(&netcp->tx_napi);
 
-	mutex_lock(&netcp_modules_lock);
 	for_each_module(netcp, intf_modpriv) {
 		module = intf_modpriv->netcp_module;
 		if (module->close) {
@@ -1666,7 +1682,6 @@ static int netcp_ndo_stop(struct net_device *ndev)
 				dev_err(netcp->ndev_dev, "Close failed\n");
 		}
 	}
-	mutex_unlock(&netcp_modules_lock);
 
 	/* Recycle Rx descriptors from completion queue */
 	netcp_empty_rx_queue(netcp);
@@ -1694,7 +1709,6 @@ static int netcp_ndo_ioctl(struct net_device *ndev,
 	if (!netif_running(ndev))
 		return -EINVAL;
 
-	mutex_lock(&netcp_modules_lock);
 	for_each_module(netcp, intf_modpriv) {
 		module = intf_modpriv->netcp_module;
 		if (!module->ioctl)
@@ -1710,7 +1724,6 @@ static int netcp_ndo_ioctl(struct net_device *ndev,
 	}
 
 out:
-	mutex_unlock(&netcp_modules_lock);
 	return (ret == 0) ? 0 : err;
 }
 
@@ -1745,11 +1758,12 @@ static int netcp_rx_add_vid(struct net_device *ndev, __be16 proto, u16 vid)
 	struct netcp_intf *netcp = netdev_priv(ndev);
 	struct netcp_intf_modpriv *intf_modpriv;
 	struct netcp_module *module;
+	unsigned long flags;
 	int err = 0;
 
 	dev_dbg(netcp->ndev_dev, "adding rx vlan id: %d\n", vid);
 
-	mutex_lock(&netcp_modules_lock);
+	spin_lock_irqsave(&netcp->lock, flags);
 	for_each_module(netcp, intf_modpriv) {
 		module = intf_modpriv->netcp_module;
 		if ((module->add_vid) && (vid != 0)) {
@@ -1761,7 +1775,8 @@ static int netcp_rx_add_vid(struct net_device *ndev, __be16 proto, u16 vid)
 			}
 		}
 	}
-	mutex_unlock(&netcp_modules_lock);
+	spin_unlock_irqrestore(&netcp->lock, flags);
+
 	return err;
 }
 
@@ -1770,11 +1785,12 @@ static int netcp_rx_kill_vid(struct net_device *ndev, __be16 proto, u16 vid)
 	struct netcp_intf *netcp = netdev_priv(ndev);
 	struct netcp_intf_modpriv *intf_modpriv;
 	struct netcp_module *module;
+	unsigned long flags;
 	int err = 0;
 
 	dev_dbg(netcp->ndev_dev, "removing rx vlan id: %d\n", vid);
 
-	mutex_lock(&netcp_modules_lock);
+	spin_lock_irqsave(&netcp->lock, flags);
 	for_each_module(netcp, intf_modpriv) {
 		module = intf_modpriv->netcp_module;
 		if (module->del_vid) {
@@ -1786,7 +1802,7 @@ static int netcp_rx_kill_vid(struct net_device *ndev, __be16 proto, u16 vid)
 			}
 		}
 	}
-	mutex_unlock(&netcp_modules_lock);
+	spin_unlock_irqrestore(&netcp->lock, flags);
 	return err;
 }
 
@@ -1903,7 +1919,7 @@ static int netcp_create_interface(struct netcp_device *netcp_device,
 			goto quit;
 		}
 
-		emac_arch_get_mac_addr(efuse_mac_addr, efuse);
+		emac_arch_get_mac_addr(efuse_mac_addr, efuse, efuse_mac);
 		if (is_valid_ether_addr(efuse_mac_addr))
 			ether_addr_copy(ndev->dev_addr, efuse_mac_addr);
 		else
@@ -2039,7 +2055,6 @@ static int netcp_probe(struct platform_device *pdev)
 	struct device_node *child, *interfaces;
 	struct netcp_device *netcp_device;
 	struct device *dev = &pdev->dev;
-	struct netcp_module *module;
 	int ret;
 
 	if (!node) {
@@ -2086,14 +2101,6 @@ static int netcp_probe(struct platform_device *pdev)
 	/* Add the device instance to the list */
 	list_add_tail(&netcp_device->device_list, &netcp_devices);
 
-	/* Probe & attach any modules already registered */
-	mutex_lock(&netcp_modules_lock);
-	for_each_netcp_module(module) {
-		ret = netcp_module_probe(netcp_device, module);
-		if (ret < 0)
-			dev_err(dev, "module(%s) probe failed\n", module->name);
-	}
-	mutex_unlock(&netcp_modules_lock);
 	return 0;
 
 probe_quit_interface:
@@ -2113,6 +2120,7 @@ probe_quit:
 static int netcp_remove(struct platform_device *pdev)
 {
 	struct netcp_device *netcp_device = platform_get_drvdata(pdev);
+	struct netcp_intf *netcp_intf, *netcp_tmp;
 	struct netcp_inst_modpriv *inst_modpriv, *tmp;
 	struct netcp_module *module;
 
@@ -2124,10 +2132,17 @@ static int netcp_remove(struct platform_device *pdev)
 		list_del(&inst_modpriv->inst_list);
 		kfree(inst_modpriv);
 	}
-	WARN(!list_empty(&netcp_device->interface_head), "%s interface list not empty!\n",
-	     pdev->name);
 
-	devm_kfree(&pdev->dev, netcp_device);
+	/* now that all modules are removed, clean up the interfaces */
+	list_for_each_entry_safe(netcp_intf, netcp_tmp,
+				 &netcp_device->interface_head,
+				 interface_list) {
+		netcp_delete_interface(netcp_device, netcp_intf->ndev);
+	}
+
+	WARN(!list_empty(&netcp_device->interface_head),
+	     "%s interface list not empty!\n", pdev->name);
+
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	platform_set_drvdata(pdev, NULL);

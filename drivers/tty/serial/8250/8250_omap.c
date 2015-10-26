@@ -22,6 +22,7 @@
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/console.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/pm_qos.h>
 #include <linux/pm_wakeirq.h>
 #include <linux/dma-mapping.h>
@@ -737,6 +738,7 @@ static void __dma_rx_do_complete(struct uart_8250_port *p, bool error)
 	struct dma_tx_state     state;
 	int                     count;
 	unsigned long		flags;
+	int			ret;
 
 	dma_sync_single_for_cpu(dma->rxchan->device->dev, dma->rx_addr,
 				dma->rx_size, DMA_FROM_DEVICE);
@@ -752,8 +754,10 @@ static void __dma_rx_do_complete(struct uart_8250_port *p, bool error)
 
 	count = dma->rx_size - state.residue;
 
-	tty_insert_flip_string(tty_port, dma->rx_buf, count);
-	p->port.icount.rx += count;
+	ret = tty_insert_flip_string(tty_port, dma->rx_buf, count);
+
+	p->port.icount.rx += ret;
+	p->port.icount.buf_overrun += count - ret;
 unlock:
 	spin_unlock_irqrestore(&priv->rx_dma_lock, flags);
 
@@ -1093,6 +1097,7 @@ static int omap8250_probe(struct platform_device *pdev)
 	struct resource *irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	struct omap8250_priv *priv;
 	struct uart_8250_port up;
+	struct gpio_desc *enable;
 	int ret;
 	void __iomem *membase;
 
@@ -1176,6 +1181,13 @@ static int omap8250_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev,
 			 "No clock speed specified: using default: %d\n",
 			 DEFAULT_CLK_SPEED);
+	}
+
+	/* on some boards, a GPIO based port enable is present */
+	enable = devm_gpiod_get_optional(&pdev->dev, "enable", GPIOD_OUT_HIGH);
+	if (IS_ERR(enable)) {
+		dev_err(&pdev->dev, "gpio request failed: %d\n", ret);
+		return PTR_ERR(enable);
 	}
 
 	priv->latency = PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE;
@@ -1370,6 +1382,8 @@ static int omap8250_runtime_suspend(struct device *dev)
 	priv->latency = PM_QOS_CPU_DMA_LAT_DEFAULT_VALUE;
 	schedule_work(&priv->qos_work);
 
+	pinctrl_pm_select_sleep_state(dev);
+
 	return 0;
 }
 
@@ -1382,6 +1396,8 @@ static int omap8250_runtime_resume(struct device *dev)
 	/* In case runtime-pm tries this before we are setup */
 	if (!priv)
 		return 0;
+
+	pinctrl_pm_select_default_state(dev);
 
 	up = serial8250_get_port(priv->line);
 	loss_cntx = omap8250_lost_context(up);

@@ -2427,6 +2427,9 @@ static int _setup_reidle(struct omap_hwmod *oh, void *data)
  * registers.  This address is needed early so the OCP registers that
  * are part of the device's address space can be ioremapped properly.
  *
+ * If SYSC access is not needed, the registers will not be remapped
+ * and non-availability of MPU access is not treated as an error.
+ *
  * Returns 0 on success, -EINVAL if an invalid hwmod is passed, and
  * -ENXIO on absent or invalid register target address space.
  */
@@ -2441,6 +2444,11 @@ static int __init _init_mpu_rt_base(struct omap_hwmod *oh, void *data,
 
 	_save_mpu_port_index(oh);
 
+	/* if we don't need sysc access we don't need to ioremap */
+	if (!oh->class->sysc)
+		return 0;
+
+	/* we can't continue without MPU PORT if we need sysc access */
 	if (oh->_int_flags & _HWMOD_NO_MPU_PORT)
 		return -ENXIO;
 
@@ -2450,8 +2458,10 @@ static int __init _init_mpu_rt_base(struct omap_hwmod *oh, void *data,
 			 oh->name);
 
 		/* Extract the IO space from device tree blob */
-		if (!np)
+		if (!np) {
+			pr_err("omap_hwmod: %s: no dt node\n", oh->name);
 			return -ENXIO;
+		}
 
 		va_start = of_iomap(np, index + oh->mpu_rt_idx);
 	} else {
@@ -2510,13 +2520,11 @@ static int __init _init(struct omap_hwmod *oh, void *data)
 				oh->name, np->name);
 	}
 
-	if (oh->class->sysc) {
-		r = _init_mpu_rt_base(oh, NULL, index, np);
-		if (r < 0) {
-			WARN(1, "omap_hwmod: %s: doesn't have mpu register target base\n",
-			     oh->name);
-			return 0;
-		}
+	r = _init_mpu_rt_base(oh, NULL, index, np);
+	if (r < 0) {
+		WARN(1, "omap_hwmod: %s: doesn't have mpu register target base\n",
+		     oh->name);
+		return 0;
 	}
 
 	r = _init_clocks(oh, NULL);
@@ -4063,4 +4071,71 @@ const char *omap_hwmod_get_main_clk(struct omap_hwmod *oh)
 		return NULL;
 
 	return oh->main_clk;
+}
+
+/**
+ * omap_hwmod_save_context - Saves the HW reset line state of submodules
+ * @oh: struct omap_hwmod *
+ * @unused: (unused, caller should pass NULL)
+ *
+ * Saves the HW reset line state of all the submodules in the hwmod
+ */
+static int omap_hwmod_save_context(struct omap_hwmod *oh, void *unused)
+{
+	int i;
+
+	for (i = 0; i < oh->rst_lines_cnt; i++)
+		oh->rst_lines[i].context =
+				_read_hardreset(oh, oh->rst_lines[i].name);
+	return 0;
+}
+
+/**
+ * omap_hwmod_restore_context - Restores the HW reset line state of submodules
+ * @oh: struct omap_hwmod *
+ * @unused: (unused, caller should pass NULL)
+ *
+ * Restores the HW reset line state of all the submodules in the hwmod
+ */
+static int omap_hwmod_restore_context(struct omap_hwmod *oh, void *unused)
+{
+	int i;
+
+	for (i = 0; i < oh->rst_lines_cnt; i++)
+		if (oh->rst_lines[i].context)
+			_assert_hardreset(oh, oh->rst_lines[i].name);
+		else if (oh->_state == _HWMOD_STATE_ENABLED)
+			_deassert_hardreset(oh, oh->rst_lines[i].name);
+
+	if (oh->_state == _HWMOD_STATE_ENABLED) {
+		if (soc_ops.enable_module)
+			soc_ops.enable_module(oh);
+	} else {
+		if (oh->flags & HWMOD_NEEDS_REIDLE)
+			_reidle(oh);
+		else if (soc_ops.disable_module)
+			soc_ops.disable_module(oh);
+	}
+
+	return 0;
+}
+
+/**
+ * omap_hwmods_save_context - Saves the HW reset line state for all hwmods
+ *
+ * Saves the HW reset line state of all the registered hwmods
+ */
+void omap_hwmods_save_context(void)
+{
+	omap_hwmod_for_each(omap_hwmod_save_context, NULL);
+}
+
+/**
+ * omap_hwmods_restore_context - Restores the HW reset line state for all hwmods
+ *
+ * Restores the HW reset line state of all the registered hwmods
+ */
+void omap_hwmods_restore_context(void)
+{
+	omap_hwmod_for_each(omap_hwmod_restore_context, NULL);
 }

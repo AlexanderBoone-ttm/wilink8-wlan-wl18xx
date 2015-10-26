@@ -95,6 +95,114 @@
 
 		default-brightness-level = <8>;
 	};
+
+	vmmcwl_fixed: fixedregulator-mmcwl {
+		compatible = "regulator-fixed";
+		regulator-name = "vmmcwl_fixed";
+		/*
+		  the gpio used for wlan_enable goes through a level shifter
+		  on the platform. the settings for 1.8v below is needed by
+		  the regulator driver, but is more of a comment since it
+		  doesn't really control the voltage of the gpio
+		*/
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&gpio5 8 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	kim {
+		compatible = "kim";
+		nshutdown_gpio = <132>;
+		dev_name = "/dev/ttyS7";
+		flow_cntrl = <1>;
+		baud_rate = <3686400>;
+	};
+
+	btwilink {
+		compatible = "btwilink";
+	};
+};
+
+&dra7_pmx_core {
+	mmc3_pins_default: mmc3_pins_default {
+		pinctrl-single,pins = <
+			0x37c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_clk.mmc3_clk */
+			0x380 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_cmd.mmc3_cmd */
+			0x384 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat0.mmc3_dat0 */
+			0x388 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat1.mmc3_dat1 */
+			0x38c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat2.mmc3_dat2 */
+			0x390 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat3.mmc3_dat3 */
+		>;
+	};
+
+	mmc3_pins_hs: mmc3_pins_hs {
+		pinctrl-single,pins = <
+			0x37c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_clk.mmc3_clk */
+			0x380 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_cmd.mmc3_cmd */
+			0x384 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat0.mmc3_dat0 */
+			0x388 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat1.mmc3_dat1 */
+			0x38c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat2.mmc3_dat2 */
+			0x390 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat3.mmc3_dat3 */
+		>;
+	};
+
+	mmc3_pins_sdr12: mmc3_pins_sdr12 {
+		pinctrl-single,pins = <
+			0x37c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_clk.mmc3_clk */
+			0x380 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_cmd.mmc3_cmd */
+			0x384 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat0.mmc3_dat0 */
+			0x388 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat1.mmc3_dat1 */
+			0x38c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat2.mmc3_dat2 */
+			0x390 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat3.mmc3_dat3 */
+		>;
+	};
+
+	mmc3_pins_sdr25: mmc3_pins_sdr25 {
+		pinctrl-single,pins = <
+			0x37c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_clk.mmc3_clk */
+			0x380 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_cmd.mmc3_cmd */
+			0x384 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat0.mmc3_dat0 */
+			0x388 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat1.mmc3_dat1 */
+			0x38c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat2.mmc3_dat2 */
+			0x390 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat3.mmc3_dat3 */
+		>;
+	};
+
+	mmc3_pins_sdr50: mmc3_pins_sdr50 {
+		pinctrl-single,pins = <
+			0x37c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_clk.mmc3_clk */
+			0x380 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_cmd.mmc3_cmd */
+			0x384 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat0.mmc3_dat0 */
+			0x388 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat1.mmc3_dat1 */
+			0x38c (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat2.mmc3_dat2 */
+			0x390 (PIN_INPUT_PULLUP | MANUAL_MODE | MUX_MODE0) /* mmc3_dat3.mmc3_dat3 */
+		>;
+	};
+};
+
+&dra7_iodelay_core {
+	mmc3_iodelay_manual1_conf: mmc3_iodelay_manual1_conf {
+		pinctrl-single,pins = <
+			0x678 (A_DELAY(406) | G_DELAY(0))	/* CFG_MMC3_CLK_IN */
+			0x680 (A_DELAY(659) | G_DELAY(0))	/* CFG_MMC3_CLK_OUT */
+			0x684 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_CMD_IN */
+			0x688 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_CMD_OEN */
+			0x68c (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_CMD_OUT */
+			0x690 (A_DELAY(130) | G_DELAY(0))	/* CFG_MMC3_DAT0_IN */
+			0x694 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT0_OEN */
+			0x698 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT0_OUT */
+			0x69c (A_DELAY(169) | G_DELAY(0))	/* CFG_MMC3_DAT1_IN */
+			0x6a0 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT1_OEN */
+			0x6a4 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT1_OUT */
+			0x6a8 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT2_IN */
+			0x6ac (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT2_OEN */
+			0x6b0 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT2_OUT */
+			0x6b4 (A_DELAY(457) | G_DELAY(0))	/* CFG_MMC3_DAT3_IN */
+			0x6b8 (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT3_OEN */
+			0x6bc (A_DELAY(0) | G_DELAY(0))		/* CFG_MMC3_DAT3_OUT */
+		>;
+	};
 };
 
 &i2c5 {
@@ -123,6 +231,18 @@
 		};
 	};
 
+	pixcir_ts@5c {
+		compatible = "pixcir,pixcir_tangoc";
+		reg = <0x5c>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <4 0>;
+
+		attb-gpio = <&gpio2 4 GPIO_ACTIVE_HIGH>;
+		reset-gpio = <&gpio2 6 GPIO_ACTIVE_HIGH>;
+
+		touchscreen-size-x = <1024>;
+		touchscreen-size-y = <600>;
+	};
 };
 
 &dss {
@@ -146,6 +266,7 @@
 };
 
 &vin3a {
+	status = "okay";
 	endpoint {
 		slave-mode;
 		remote-endpoint = <&cam>;
@@ -160,20 +281,35 @@
 	};
 };
 
-&i2c5 {
+&uart8 {
 	status = "okay";
-	clock-frequency = <400000>;
+};
 
-	pixcir_ts@5c {
-		compatible = "pixcir,pixcir_tangoc";
-		reg = <0x5c>;
-		interrupt-parent = <&gpio2>;
-		interrupts = <4 0>;
+&mmc3 {
+	status = "okay";
+	vmmc-supply = <&vmmcwl_fixed>;
+	bus-width = <4>;
+	pinctrl-names = "default";
+	cap-power-off-card;
+	keep-power-in-suspend;
+	ti,non-removable;
+	pinctrl-names = "default", "hs", "sdr12", "sdr25", "sdr50";
+	pinctrl-0 = <&mmc3_pins_default &mmc3_iodelay_manual1_conf>;
+	pinctrl-1 = <&mmc3_pins_hs &mmc3_iodelay_manual1_conf>;
+	pinctrl-2 = <&mmc3_pins_sdr12 &mmc3_iodelay_manual1_conf>;
+	pinctrl-3 = <&mmc3_pins_sdr25 &mmc3_iodelay_manual1_conf>;
+	pinctrl-4 = <&mmc3_pins_sdr50 &mmc3_iodelay_manual1_conf>;
 
-		attb-gpio = <&gpio2 4 GPIO_ACTIVE_HIGH>;
-		reset-gpio = <&gpio2 6 GPIO_ACTIVE_HIGH>;
-
-		touchscreen-size-x = <1024>;
-		touchscreen-size-y = <600>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	wlcore: wlcore@0 {
+		compatible = "ti,wl1835";
+		reg = <2>;
+		interrupt-parent = <&gpio5>;
+		interrupts = <7 IRQ_TYPE_LEVEL_HIGH>;
 	};
+};
+
+&pcie1 {
+	pcie-reset-gpio = <&gpio2 8 GPIO_ACTIVE_LOW>;
 };
